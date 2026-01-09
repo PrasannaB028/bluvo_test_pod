@@ -2,9 +2,8 @@ import re
 import json
 from pathlib import Path
 from faster_whisper import WhisperModel
+from engine.config import HF_STORE
 
-# 🔒 GLOBAL WHISPER INSTANCE (LOAD ONCE PER WORKER)
-_WHISPER_MODEL = None
 
 # ======================================================
 # NORMALIZATION
@@ -16,24 +15,39 @@ def normalize(text: str) -> str:
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
+
 def tokenize(text: str):
+    if not text:
+        return []
     return normalize(text).split()
+
 
 # ======================================================
 # WORD COMPATIBILITY (STRICT + SAFE)
 # ======================================================
 
 def word_compatible(a: str, b: str) -> bool:
+    if not a or not b:
+        return False
+
     if a == b:
         return True
 
+    # numbers (20000 ↔ 20,000)
     if a.replace(",", "") == b.replace(",", ""):
         return True
 
+    # allow acronyms (MG, EV, ZS)
+    if a.isupper() and b.isupper() and len(a) <= 3 and len(b) <= 3:
+        return a == b
+
+    # avoid short garbage matches
     if len(a) < 4 or len(b) < 4:
         return False
 
+    # controlled prefix match
     return a.startswith(b[:4]) or b.startswith(a[:4])
+
 
 # ======================================================
 # MATCH THRESHOLD
@@ -46,16 +60,22 @@ def match_threshold(word_count: int) -> float:
         return 0.55
     return 0.35
 
+
 # ======================================================
-# PHRASE MATCHING (ANCHOR-BASED)
+# PHRASE MATCHING (ANCHOR-BASED, SAFE)
 # ======================================================
 
 def find_phrase_matches(words, h_words):
+    # 🚨 HARD GUARDS (NO MORE CRASHES)
+    if not words or not h_words:
+        return []
+
     H = len(h_words)
     threshold = match_threshold(H)
     matches = []
 
     for i in range(len(words)):
+        # 🔒 anchor on first keyword
         if not word_compatible(h_words[0], words[i]["word"]):
             continue
 
@@ -79,6 +99,7 @@ def find_phrase_matches(words, h_words):
         start = matched[0]["start"]
         end = matched[-1]["end"]
 
+        # ⛔ prevent stretched garbage matches
         if end - start > max(2.5, H * 0.75):
             continue
 
@@ -90,30 +111,24 @@ def find_phrase_matches(words, h_words):
 
     return matches
 
+
 # ======================================================
-# MAIN EXTRACTION (SERVERLESS SAFE)
+# MAIN EXTRACTION (OFFLINE SAFE)
 # ======================================================
 
 def extract_highlights(audio_path, highlights, debug_dir="debug"):
-    global _WHISPER_MODEL
-
     Path(debug_dir).mkdir(exist_ok=True)
 
-    # 🔥 LOAD WHISPER ONCE (NO RUNTIME DOWNLOADS)
-    if _WHISPER_MODEL is None:
-        _WHISPER_MODEL = WhisperModel(
-            "small",                 # ✅ FAST + SERVERLESS SAFE
-            device="cuda",
-            compute_type="float16",
-            download_root="/models/hf",
-            local_files_only=True    # 🔒 ABSOLUTELY REQUIRED
-        )
-
-    model = _WHISPER_MODEL
+    model = WhisperModel(
+        "large-v3",
+        device="cuda",
+        compute_type="float16"
+    )
 
     segments, _ = model.transcribe(
         audio_path,
         language="en",
+        task="transcribe",
         word_timestamps=True,
         vad_filter=True
     )
@@ -144,16 +159,22 @@ def extract_highlights(audio_path, highlights, debug_dir="debug"):
     }
 
     # ------------------------------------------------------
-    # PASS 1: Whisper matches
+    # PASS 1: Whisper matching
     # ------------------------------------------------------
     for idx, text in enumerate(highlights):
         h_words = tokenize(text)
+
+        # 🚨 SKIP EMPTY / GARBAGE HIGHLIGHTS
+        if not h_words:
+            unmatched.append({"index": idx, "text": text})
+            continue
+
         matches = find_phrase_matches(words, h_words)
 
         if matches:
             best = sorted(matches, key=lambda x: (-x["score"], x["start"]))[0]
-            max_dur = max(1.2, len(h_words) * 0.7)
 
+            max_dur = max(1.2, len(h_words) * 0.7)
             start = best["start"]
             end = min(start + max_dur, best["end"], audio_end)
 
@@ -173,10 +194,13 @@ def extract_highlights(audio_path, highlights, debug_dir="debug"):
         else:
             unmatched.append({"index": idx, "text": text})
 
+    # ------------------------------------------------------
+    # Sort matched by time
+    # ------------------------------------------------------
     matched.sort(key=lambda x: x["start"])
 
     # ------------------------------------------------------
-    # Build gaps
+    # Build gaps (strictly inside audio duration)
     # ------------------------------------------------------
     gaps = []
 
@@ -193,7 +217,7 @@ def extract_highlights(audio_path, highlights, debug_dir="debug"):
         gaps.append([0.0, audio_end])
 
     # ------------------------------------------------------
-    # PASS 2: Gap fill
+    # PASS 2: Gap filling
     # ------------------------------------------------------
     gap_idx = 0
 
@@ -207,10 +231,15 @@ def extract_highlights(audio_path, highlights, debug_dir="debug"):
 
             if available >= 0.6:
                 start = g_start + 0.2
-                end = min(start + base_duration, audio_end)
+                duration = min(base_duration, g_end - start)
+                end = start + duration
+
+                if end > audio_end:
+                    end = audio_end
 
                 if end > start:
                     gaps[gap_idx][0] = end
+
                     item = {
                         "index": u["index"],
                         "text": u["text"],
@@ -219,14 +248,21 @@ def extract_highlights(audio_path, highlights, debug_dir="debug"):
                         "score": 0.0,
                         "mode": "gap_fill"
                     }
+
                     matched.append(item)
                     debug["gap_filled"].append(item)
                     break
 
             gap_idx += 1
 
+    # ------------------------------------------------------
+    # Final order = original highlight order
+    # ------------------------------------------------------
     matched.sort(key=lambda x: x["index"])
 
+    # ------------------------------------------------------
+    # Debug output
+    # ------------------------------------------------------
     with open(Path(debug_dir) / f"{Path(audio_path).stem}_highlights.json", "w") as f:
         json.dump(debug, f, indent=2)
 
