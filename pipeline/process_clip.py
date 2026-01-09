@@ -102,19 +102,19 @@ def process_single_clip(
 
         final.write_videofile(
             output_path,
-            codec="h264_nvenc",          # ✅ GPU encoder
+            codec="libx264",
             audio_codec="aac",
             fps=video.fps,
-            threads=2,                   # reduce CPU contention
+            threads=4,
             logger=None,
             ffmpeg_params=[
+                "-preset", "ultrafast",
+                "-crf", "23",
                 "-pix_fmt", "yuv420p",
-                "-preset", "p4",          # NVENC balanced
-                "-rc", "vbr",
-                "-cq", "19",               # quality control
                 "-movflags", "+faststart"
             ]
         )
+
 
         return output_path
 
