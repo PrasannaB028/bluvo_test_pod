@@ -16,11 +16,11 @@ LOGO_PATH = "bluvo-logo.png"
 
 CONFIG = {
     "BLUR_PLATE": True,
-    "PLATE_MODEL_PATH": "models/lp_key_point.pt",
+    "PLATE_MODEL_PATH": "models/lp_key_point.pt",          
 }
 
 # --------------------------------------------------
-# HELPERS
+# HELPERS fine i will do it myself
 # --------------------------------------------------
 def download_file(url: str, dst: str):
     os.makedirs(os.path.dirname(dst), exist_ok=True)
