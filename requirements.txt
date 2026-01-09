@@ -1,0 +1,12 @@
+runpod
+moviepy==1.0.3
+numpy==1.26.4
+opencv-python==4.9.0.80
+Pillow==9.5.0
+soundfile==0.13.1
+faster-whisper==1.2.1
+elevenlabs==2.25.0
+ultralytics==8.3.241
+requests==2.32.5
+transformers==4.57.3
+imagekitio
