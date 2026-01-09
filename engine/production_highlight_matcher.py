@@ -120,9 +120,11 @@ def extract_highlights(audio_path, highlights, debug_dir="debug"):
     Path(debug_dir).mkdir(exist_ok=True)
 
     model = WhisperModel(
-        "large-v3",
+        "small",
         device="cuda",
-        compute_type="float16"
+        compute_type="float16",
+        download_root="/models/hf",
+        local_files_only=True,
     )
 
     segments, _ = model.transcribe(
