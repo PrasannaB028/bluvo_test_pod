@@ -19,17 +19,15 @@ def numeric_sort(filename):
 
 def compress_video(input_path: str, output_path: str, crf: int = 24):
     """
-    Compress final video WITHOUT changing resolution or visuals.
-    Typical output:
+    Compress final video WITHOUT changing visuals.
+    Typical:
       80–120MB → 20–35MB
     """
     cmd = [
         "ffmpeg", "-y",
         "-i", input_path,
-        "-map", "0:v:0",
-        "-map", "0:a:0?",
         "-c:v", "libx264",
-        "-preset", "slow",
+        "-preset", "medium",        # 🔥 balanced speed/size
         "-crf", str(crf),
         "-pix_fmt", "yuv420p",
         "-profile:v", "high",
@@ -56,8 +54,8 @@ def combine_clips(
     watermark_scale=0.28,
     watermark_opacity=0.5,
     margin=40,
-    compress=True,          # 🔥 NEW
-    compression_crf=24      # 🔥 NEW
+    compress=True,
+    compression_crf=24
 ):
     files = sorted(
         [f for f in os.listdir(clips_dir) if f.endswith(".mp4")],
@@ -68,6 +66,7 @@ def combine_clips(
         raise RuntimeError("No clips found")
 
     processed = []
+    final = None
     target_ratio = target_w / target_h
 
     try:
@@ -76,6 +75,7 @@ def combine_clips(
         # ------------------------------------------
         for f in files:
             clip = VideoFileClip(os.path.join(clips_dir, f))
+
             scale = (
                 target_w / clip.w
                 if (clip.w / clip.h) > target_ratio
@@ -133,7 +133,7 @@ def combine_clips(
         )
 
         # ------------------------------------------
-        # Compress (optional)
+        # Compress
         # ------------------------------------------
         if compress:
             compress_video(
@@ -156,7 +156,42 @@ def combine_clips(
                 c.close()
             except:
                 pass
+
         try:
-            final.close()
+            if final:
+                final.close()
         except:
             pass
+
+
+# def run_combine_from_folder():
+#     """
+#     Run video merge using clips inside the clips folder.
+#     Files must be named like: 1.mp4, 2.mp4, 3.mp4 ...
+#     """
+
+#     clips_dir = r"D:\test\Video_Voice_automation\clips_output"              # folder containing clips
+#     output_path = "1_final_output.mp4" # final merged video
+#     logo_path = r"D:\test\Video_Voice_automation\bluvo-logo.png"            # your logo image
+
+#     if not os.path.exists(clips_dir):
+#         raise RuntimeError(f"Clips folder not found: {clips_dir}")
+
+#     if not os.path.exists(logo_path):
+#         raise RuntimeError(f"Logo file not found: {logo_path}")
+
+#     print("▶ Merging clips from:", clips_dir)
+
+#     combine_clips(
+#         clips_dir=clips_dir,
+#         output_path=output_path,
+#         logo_path=logo_path,
+#         compress=True,
+#         compression_crf=24
+#     )
+
+#     print("✅ Final video created:", output_path)
+
+
+# if __name__ == "__main__":
+#     run_combine_from_folder()
